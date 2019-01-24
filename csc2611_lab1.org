@@ -1,0 +1,459 @@
+#+OPTIONS: toc:nil
+
+#+LATEX_CLASS: article
+#+LATEX_CLASS_OPTIONS: [a4paper]
+
+#+PROPERTY: header-args    :exports both
+
+* CSC2611 Lab -- Renato Ferreira Pinto Junior (1005032581)
+
+** Part 1
+
+Imports.
+
+#+BEGIN_SRC ipython :session :results none
+  import nltk
+  from nltk.corpus import brown
+  import scipy.sparse
+  import scipy.stats
+  import numpy as np
+#+END_SRC
+
+Extract 5000 most frequent words from Brown corpus.
+
+#+BEGIN_SRC ipython :session :results none
+  all_words   = brown.words()
+  most_common = nltk.FreqDist(all_words).most_common(5000)
+  W           = [word for word, freq in most_common]
+#+END_SRC
+
+*** Most/least common words
+
+Report 5 most and least common words in W.
+
+#+BEGIN_SRC ipython :session :results output
+  print("Five most common words:")
+  for w in W[:5]:
+      print("\t%s" % w)
+
+  print("Five least common words:")
+  for w in W[-5:]:
+      print("\t%s" % w)
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+Five most common words:
+	the
+	,
+	.
+	of
+	and
+Five least common words:
+	expanded
+	emphasize
+	Manhattan
+	temporarily
+	puts
+#+end_example
+
+Augment W with words from RB65.
+
+#+BEGIN_SRC ipython :session :results output
+    words_to_add = [
+        'asylum', 'autograph', 'automobile', 'bird', 'boy', 'brother', 'car',
+        'cemetery', 'coast', 'cock', 'cord', 'crane', 'cushion', 'food',
+        'forest', 'fruit', 'furnace', 'gem', 'glass', 'graveyard', 'grin', 'hill',
+        'implement', 'jewel', 'journey', 'lad', 'madhouse', 'magician', 'midday',
+        'monk', 'mound', 'noon', 'oracle', 'pillow', 'rooster', 'sage', 'serf', 'shore',
+        'signature', 'slave', 'smile', 'stove', 'string', 'tool', 'tumbler', 'voyage',
+        'wizard', 'woodland',
+    ]
+    for w in words_to_add:
+        if w not in W:
+            W.append(w)
+    print("W now has %d words" % len(W))
+#+END_SRC
+
+#+RESULTS:
+: W now has 5031 words
+
+Collect bigrams from Brown corpus and make sparse word-context matrix.
+
+#+BEGIN_SRC ipython :session :results none
+  bigrams = nltk.bigrams(all_words)
+  index   = dict(list(zip(W, range(len(W)))))
+  W_set   = set(W)
+
+  M1      = scipy.sparse.lil_matrix((len(W), len(W)))
+  for context, word in bigrams:
+      if context in W_set and word in W_set:
+          M1[index[word], index[context]] += 1
+#+END_SRC
+
+Compute PPMI matrix from counts in M1.
+
+#+BEGIN_SRC ipython :session :results none
+  M1_csr = M1.tocsr()
+  M1_csc = M1.tocsc()
+  M1_sum = M1.sum()
+
+  def word_context_joint_prob(w, c):
+      return M1_csr[w,c] / M1_sum
+
+  def word_prob(w):
+      return M1_csr[w,:].sum() / M1_sum
+
+  def context_prob(c):
+      return M1_csc[:,c].sum() / M1_sum
+
+  def ppmi(w, c):
+      p_wc = word_context_joint_prob(w, c)
+      p_w  = word_prob(w)
+      p_c  = context_prob(c)
+      return max(0, np.log(p_wc) - np.log(p_w) - np.log(p_c))
+
+  M1p = scipy.sparse.lil_matrix((len(W), len(W)))
+  I, J, _ = scipy.sparse.find(M1)
+  for i, j in zip(I, J):
+      M1p[i, j] = ppmi(i, j)
+#+END_SRC
+
+Apply principal component analysis (via SVD) to obtain latent semantic models at three truncations.
+
+#+BEGIN_SRC ipython :session :results none
+  U, S, V = scipy.sparse.linalg.svds(M1p, k=300)
+  M2_300  = U @ np.diag(S)
+  M2_100  = M2_300[:,:100]
+  M2_10   = M2_100[:,:10]
+#+END_SRC
+
+Table of similarity judgements from RG65:
+
+:BEGIN:
+#+TBLNAME: sim_judge
+| cord       | smile     | 0.02 |
+| rooster    | voyage    | 0.04 |
+| noon       | string    | 0.04 |
+| fruit      | furnace   | 0.05 |
+| autograph  | shore     | 0.06 |
+| automobile | wizard    | 0.11 |
+| mound      | stove     | 0.14 |
+| grin       | implement | 0.18 |
+| asylum     | fruit     | 0.19 |
+| asylum     | monk      | 0.39 |
+| graveyard  | madhouse  | 0.42 |
+| glass      | magician  | 0.44 |
+| boy        | rooster   | 0.44 |
+| cushion    | jewel     | 0.45 |
+| monk       | slave     | 0.57 |
+| asylum     | cemetery  | 0.79 |
+| coast      | forest    | 0.85 |
+| grin       | lad       | 0.88 |
+| shore      | woodland  | 0.90 |
+| monk       | oracle    | 0.91 |
+| boy        | sage      | 0.96 |
+| automobile | cushion   | 0.97 |
+| mound      | shore     | 0.97 |
+| lad        | wizard    | 0.99 |
+| forest     | graveyard | 1.00 |
+| food       | rooster   | 1.09 |
+| cemetery   | woodland  | 1.18 |
+| shore      | voyage    | 1.22 |
+| bird       | woodland  | 1.24 |
+| coast      | hill      | 1.26 |
+| furnace    | implement | 1.37 |
+| crane      | rooster   | 1.41 |
+| hill       | woodland  | 1.48 |
+| car        | journey   | 1.55 |
+| cemetery   | mound     | 1.69 |
+| glass      | jewel     | 1.78 |
+| magician   | oracle    | 1.82 |
+| crane      | implement | 2.37 |
+| brother    | lad       | 2.41 |
+| sage       | wizard    | 2.46 |
+| oracle     | sage      | 2.61 |
+| bird       | crane     | 2.63 |
+| bird       | cock      | 2.63 |
+| food       | fruit     | 2.69 |
+| brother    | monk      | 2.74 |
+| asylum     | madhouse  | 3.04 |
+| furnace    | stove     | 3.11 |
+| magician   | wizard    | 3.21 |
+| hill       | mound     | 3.29 |
+| cord       | string    | 3.41 |
+| glass      | tumbler   | 3.45 |
+| grin       | smile     | 3.46 |
+| serf       | slave     | 3.46 |
+| journey    | voyage    | 3.58 |
+| autograph  | signature | 3.59 |
+| coast      | shore     | 3.60 |
+| forest     | woodland  | 3.65 |
+| implement  | tool      | 3.66 |
+| cock       | rooster   | 3.68 |
+| boy        | lad       | 3.82 |
+| cushion    | pillow    | 3.84 |
+| cemetery   | graveyard | 3.88 |
+| automobile | car       | 3.92 |
+| midday     | noon      | 3.94 |
+| gem        | jewel     | 3.94 |
+:END:
+
+Keep only those that appear in the original data.
+
+#+BEGIN_SRC ipython :session :results none :var sim_judge=sim_judge
+  S = []
+  for w1, w2, sim in sim_judge:
+      if M1_csr[index[w1],:].sum() == 0 or M1_csr[index[w2],:].sum() == 0:
+          continue
+      S.append([w1, w2, sim])
+  S = np.array(S)
+#+END_SRC
+
+Compute cosine similarities based on each set of vectors over RG65.
+
+#+BEGIN_SRC ipython :session :results none
+  def cosine_sim(w1, w2, embs):
+      v1 = embs[index[w1],:]
+      v2 = embs[index[w2],:]
+      if scipy.sparse.isspmatrix(v1):
+          v1 = v1.toarray()[0,:]
+      if scipy.sparse.isspmatrix(v2):
+          v2 = v2.toarray()[0,:]
+      norm1 = np.linalg.norm(v1)
+      norm2 = np.linalg.norm(v2)
+      return np.dot(v1, v2) / (norm1*norm2)
+
+  def compute_similarities(embs):
+      res = np.zeros(len(S))
+      for i in range(len(S)):
+          res[i] = cosine_sim(S[i,0], S[i,1], embs)
+      return res
+
+  S_M1     = compute_similarities(M1)
+  S_M1p    = compute_similarities(M1p)
+  S_M2_10  = compute_similarities(M2_10)
+  S_M2_100 = compute_similarities(M2_100)
+  S_M2_300 = compute_similarities(M2_300)
+#+END_SRC
+
+*** Pearson correlations
+
+Compute Pearson correlations between similarity judgements and model-predicted similarities.
+
+#+BEGIN_SRC ipython :session :results output
+  models = {
+      'S_M1'     : S_M1,
+      'S_M1p'    : S_M1p,
+      'S_M2_10'  : S_M2_10,
+      'S_M2_100' : S_M2_100,
+      'S_M2_300' : S_M2_300,
+  }
+  S_sims = S[:,2].astype('float')
+
+  print("Pearson correlation between S and...")
+  for name, sims in models.items():
+      cor, p = scipy.stats.pearsonr(S_sims, sims)
+      print("\t%8s: %.3f\t(p = %.3f)" % (name, cor, p))
+#+END_SRC
+
+#+RESULTS:
+: Pearson correlation between S and...
+: 	    S_M1: 0.090	(p = 0.508)
+: 	   S_M1p: 0.276	(p = 0.038)
+: 	 S_M2_10: 0.150	(p = 0.267)
+: 	S_M2_100: 0.152	(p = 0.261)
+: 	S_M2_300: 0.293	(p = 0.027)
+
+** Part 2
+
+Extract embeddings for the words used in the first analysis.
+
+#+BEGIN_SRC ipython :session :results none
+  from gensim.models import KeyedVectors
+  word2vec = KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin',
+                                               binary=True)
+#+END_SRC
+
+#+BEGIN_SRC ipython :session :results none
+  S_word2vec = np.zeros(len(S))
+  for i in range(len(S)):
+      v1 = word2vec[S[i,0]]
+      v2 = word2vec[S[i,1]]
+      norm1 = np.linalg.norm(v1)
+      norm2 = np.linalg.norm(v2)
+      S_word2vec[i] = np.dot(v1, v2) / (norm1*norm2)
+#+END_SRC
+
+*** Pearson correlation
+
+Compute Pearson correlation between word2vec prediction and similarity judgements.
+
+#+BEGIN_SRC ipython :session :results output
+  cor, p = scipy.stats.pearsonr(S_sims, S_word2vec)
+  print("Pearson correlation between S and S_word2vec: %.3f (p = %.3f)" % (cor, p))
+#+END_SRC
+
+#+RESULTS:
+: Pearson correlation between S and S_word2vec: 0.788 (p = 0.000)
+
+We can see that the similarity predicted by word2vec correlates with human judgements significantly
+better than the word-context vectors or LSA, at least for this dataset and training corpora.
+Word2vec achieves Pearson correlation coefficient 0.788, compared to 0.293 for the best
+performing LSA model (300 dimensions).
+
+*** Analogy tasks
+
+Read and parse analogy tasks from data file.
+
+#+BEGIN_SRC ipython :session :results output
+  semantic  = []
+  syntactic = []
+
+  curr = None
+  with open('word-test.v1.txt', 'r') as f:
+      for line in f:
+          if line.startswith('//'):
+              continue
+          elif line.startswith(':'):
+              curr = syntactic if 'gram' in line else semantic
+          else:
+              words = line.strip().split()
+              assert(len(words) == 4)
+              curr.append(words)
+
+  print("Loaded %d semantic and %d syntactic test cases" % (len(semantic), len(syntactic)))
+#+END_SRC
+
+#+RESULTS:
+: Loaded 8869 semantic and 10675 syntactic test cases
+
+Filter test cases to those covered by both LSA and word2vec.
+
+#+BEGIN_SRC ipython :session :results output
+  def word_covered(w):
+      if w not in index:
+          return False
+      if M1_csr[index[w],:].sum() == 0:
+          return False
+      if w not in word2vec:
+          return False
+      return True
+
+  def test_case_covered(case):
+      for word in case:
+          if not word_covered(word):
+              return False
+      return True
+
+  semantic  = [case for case in semantic  if test_case_covered(case)]
+  syntactic = [case for case in syntactic if test_case_covered(case)]
+
+  print("Retained %d semantic and %d syntactic test cases" % (len(semantic), len(syntactic)))
+#+END_SRC
+
+#+RESULTS:
+: Retained 119 semantic and 1895 syntactic test cases
+
+Gather a set of candidate words available in both LSA and word2vec for analogy test.
+
+#+BEGIN_SRC ipython :session :results output
+  candidates = []
+  for word in W:
+      if word not in word2vec:
+          continue
+      if word not in index:
+          continue
+      if M1_csr[index[word],:].sum() == 0:
+          continue
+      candidates.append(word)
+
+  print("Gathered %d words for tests" % len(candidates))
+#+END_SRC
+
+#+RESULTS:
+: Gathered 4940 words for tests
+
+Code to perform analogy test.
+
+#+BEGIN_SRC ipython :session :results none
+    def analogy_test(cases, embs, use_index):
+        def get_emb(w):
+            if use_index:
+                res = embs[index[w]]
+                if scipy.sparse.isspmatrix(res):
+                    res = res.toarray()[0,:]
+                return res
+            else:
+                return embs[w]
+
+        def dist(u, v):
+            return 1 - np.dot(u, v) / np.linalg.norm(u) / np.linalg.norm(v)
+
+        correct = 0
+        for w1, w2, w3, w4 in cases:
+            v1 = get_emb(w1)
+            v2 = get_emb(w2)
+            v3 = get_emb(w3)
+
+            best_dist = float('inf')
+            best_word = None
+            for word in candidates:
+                if word in [w1, w2, w3]:
+                    continue
+                d = dist(get_emb(word), v2 - v1 + v3)
+                if d < best_dist:
+                    best_dist = d
+                    best_word = word
+
+            correct += (best_word == w4)
+
+        return correct / len(cases)
+#+END_SRC
+
+**** Analogy results
+
+Evaluate all models on analogy tasks.
+
+#+BEGIN_SRC ipython :session :results output
+  def evaluate(task_name, task):
+      lsa_res      = analogy_test(task, M2_300,   use_index=True)
+      word2vec_res = analogy_test(task, word2vec, use_index=False)
+      print("Results for %s analogy:" % task_name)
+      print("         LSA: %.3f" % lsa_res)
+      print("    word2vec: %.3f" % word2vec_res)
+
+  evaluate('semantic',  semantic)
+  evaluate('syntactic', syntactic)
+#+END_SRC
+
+#+RESULTS:
+: Results for semantic analogy:
+:          LSA: 0.210
+:     word2vec: 0.908
+: Results for syntactic analogy:
+:          LSA: 0.056
+:     word2vec: 0.755
+
+We can see that both LSA and word2vec perform better on the semantic analogy task than on the
+syntactic analogy task.
+Moreover, word2vec outperforms LSA by a wide margin on both tasks.
+
+*** Suggestion for improvement
+
+As one suggestion for improving these vector-based models in capturing word similarity, I
+propose the addition of (non-linguistic) perceptual features to the data that goes into
+building these vectors.
+
+At their core, word2vec and related models rely on the distributional
+hypothesis, which says that similar words occur in similar linguistic contexts. However,
+similarity is multi-faceted, and not all similarity is necessarily captured in text.
+
+For example, consider the similarity between *plate* and *disc*, which is arguably visual
+in nature. Word2vec measures it at $0.157$. At the same time, the similarity between
+*plate* and *desk* is $0.255$, but it is hard to argue that the second pair is more similar
+than the first.
+
+Hence, integrating visual, and possibly other perceptual, features into a distributional model
+such as word2vec has the potential to capture richer word similarities than warranted by
+linguistic data alone.
